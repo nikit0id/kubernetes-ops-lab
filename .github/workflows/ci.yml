@@ -1,0 +1,67 @@
+name: Checks and Kubernetes lab
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python -m unittest discover -s tests -v
+
+  kubernetes:
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+      - name: Install kind and kubectl with checksum checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/lab-tools"
+          cd "$RUNNER_TEMP/lab-tools"
+          curl --fail --location --retry 3 --output kind-linux-amd64 \
+            https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64
+          curl --fail --location --retry 3 --output kind-linux-amd64.sha256sum \
+            https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64.sha256sum
+          sha256sum --check kind-linux-amd64.sha256sum
+          curl --fail --location --retry 3 --output kubectl \
+            https://dl.k8s.io/release/v1.34.11/bin/linux/amd64/kubectl
+          curl --fail --location --retry 3 --output kubectl.sha256 \
+            https://dl.k8s.io/release/v1.34.11/bin/linux/amd64/kubectl.sha256
+          printf '%s  kubectl\n' "$(cat kubectl.sha256)" | sha256sum --check
+          install -m 0755 kind-linux-amd64 kind
+          chmod +x kubectl
+          printf '%s\n' "$RUNNER_TEMP/lab-tools" >> "$GITHUB_PATH"
+      - name: Build, create two nodes, validate and deploy, HTTP smoke
+        run: python scripts/lab.py up
+      - name: Reproduce ImagePullBackOff
+        run: python scripts/lab.py break-image --confirm-lab-failure
+      - name: Restore previous revision and repeat checks
+        if: success() || failure()
+        run: python scripts/lab.py rollback
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: python scripts/lab.py diagnose
+      # Runner is ephemeral: no persistent server or credentials are involved.
