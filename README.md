@@ -1,8 +1,10 @@
 # Kubernetes Ops Lab
 
+[![CI](https://github.com/nikit0id/kubernetes-ops-lab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nikit0id/kubernetes-ops-lab/actions/workflows/ci.yml)
+
 Учебный DevOps-проект: Python HTTP-сервис в локальном двухузловом Kubernetes-кластере на **kind**. Контейнеризация, probes, ресурсы, диагностика `ImagePullBackOff` и откат Deployment.
 
-**Статус:** проект проверен на реальном локальном стенде WSL2: Docker build, два Ready-узла, две реплики, HTTP, DNS/ClusterIP, воспроизведение ImagePullBackOff и rollback. Все 15 тестов прошли на Windows и Linux. GitHub Actions пока **не запускался**. Подробности и ограничения — [docs/verification.md](docs/verification.md). Это учебный стенд, не production-инфраструктура.
+**Статус:** проект проверен на реальном локальном стенде WSL2: Docker build, два Ready-узла, две реплики, HTTP, DNS/ClusterIP, воспроизведение ImagePullBackOff и rollback. Все 16 тестов прошли на Windows и Linux. Текущий результат GitHub Actions — по значку CI выше. Подробности и ссылки на реальные запуски — [docs/verification.md](docs/verification.md). Это учебный стенд, не production-инфраструктура.
 
 ## Что реализовано
 
