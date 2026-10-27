@@ -2,7 +2,7 @@
 
 Учебный DevOps-проект: Python HTTP-сервис в локальном двухузловом Kubernetes-кластере на **kind**. Контейнеризация, probes, ресурсы, диагностика `ImagePullBackOff` и откат Deployment.
 
-**Статус:** HTTP-тесты и статические проверки выполнены локально. Docker/Kubernetes и GitHub Actions пока **не запускались**: на исходной Windows-машине нет Docker, WSL2 не стартует. Подробности — [docs/verification.md](docs/verification.md). Это учебный стенд, не production-инфраструктура.
+**Статус:** проект проверен на реальном локальном стенде WSL2: Docker build, два Ready-узла, две реплики, HTTP, DNS/ClusterIP, воспроизведение ImagePullBackOff и rollback. Все 15 тестов прошли на Windows и Linux. GitHub Actions пока **не запускался**. Подробности и ограничения — [docs/verification.md](docs/verification.md). Это учебный стенд, не production-инфраструктура.
 
 ## Что реализовано
 
@@ -79,6 +79,8 @@ python3 -m venv .venv
 
 ## 2. Запуск Kubernetes-стенда
 
+**На текущей машине Docker уже установлен внутри Arch WSL, а не в Windows.** Для повторного запуска готового кластера используйте [инструкцию WSL](docs/wsl-local.md). Команды из Windows Git Bash ниже подходят только если инструменты и Docker доступны непосредственно в Windows.
+
 Нужны работающий Docker Engine в режиме Linux containers, kind **v0.33.0**, kubectl **v1.34.11**, Python 3.13+. Все инструменты должны быть доступны **в одной среде**. Для Windows удобен Docker Desktop с работающим WSL2/гипервизором; здесь его установка не автоматизируется. Не смешивайте Windows kubectl и kubeconfig из другой машины/WSL.
 
 Официальные инструкции: [kind](https://kind.sigs.k8s.io/docs/user/quick-start/), [kubectl](https://kubernetes.io/docs/tasks/tools/), [Docker Desktop для Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
@@ -107,7 +109,7 @@ python scripts/lab.py smoke
 python scripts/lab.py verify
 ```
 
-**Важно:** `kubectl port-forward service/...` перенаправляет запросы к выбранному Pod. Эта проверка не доказывает балансировку Service и работу полного сетевого пути через ClusterIP.
+**Важно:** `kubectl port-forward service/...` перенаправляет запросы к выбранному Pod. Эта проверка не доказывает балансировку Service и работу полного сетевого пути через ClusterIP. При локальной проверке отдельно выполнен запрос из Pod по DNS-имени Service через ClusterIP — он прошёл; балансировка не проверялась.
 
 ## 3. Диагностика и откат
 
@@ -132,7 +134,7 @@ python scripts/lab.py diagnose
 
 После публикации в GitHub workflow запускается на push и pull request; также доступен ручной запуск. Job `checks` проверяет Python и манифесты. Job `kubernetes` собирает образ, поднимает два узла на временном Ubuntu runner, проверяет приложение, воспроизводит ошибку и выполняет откат. Образы в registry не публикуются, внешние серверы не используются.
 
-Если Actions отключены для аккаунта/репозитория или runner недоступен, end-to-end проверка не произойдёт. До успешного запуска не добавляйте в резюме утверждение об успешно пройденном CI или проверенном развёртывании этого репозитория.
+Если Actions отключены для аккаунта/репозитория или runner недоступен, end-to-end проверка в GitHub не произойдёт. Успешное локальное развёртывание уже проверено, но утверждать успешно пройденный GitHub Actions можно только после реального зелёного workflow run.
 
 ## Ограничения и объяснение решений
 

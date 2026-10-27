@@ -1,6 +1,7 @@
 """Cross-platform lab commands. Always target the dedicated kind context."""
 
 import argparse
+import http.client
 import json
 import re
 import shutil
@@ -129,7 +130,7 @@ def smoke():
                             check_json(url, path)
                         print("HTTP smoke passed", flush=True)
                         return
-                    except (urllib.error.URLError, TimeoutError):
+                    except (urllib.error.URLError, TimeoutError, http.client.RemoteDisconnected):
                         pass
                 time.sleep(0.5)
             raise RuntimeError("Port-forward smoke timed out; see .local/port-forward.log")
@@ -148,6 +149,8 @@ def verify():
     if len(nodes) != 2:
         raise RuntimeError("Expected exactly two nodes")
     kube("rollout", "status", "deployment/ops-lab", "--timeout=180s")
+    # Deployment status can briefly be stale after a node/WSL restart.
+    kube("wait", "--for=condition=Ready", "pods", "-l", "app=ops-lab", "--timeout=120s")
     deployment = json.loads(kube("get", "deployment/ops-lab", "-o", "json", capture=True))
     if deployment["status"].get("availableReplicas", 0) != 2:
         raise RuntimeError("Expected two available replicas")

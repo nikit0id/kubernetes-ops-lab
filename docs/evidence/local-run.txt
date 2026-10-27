@@ -1,0 +1,113 @@
+Actual local execution excerpts. Paths to the checkout are replaced with <project-root>.
+These are selected real log sections, not a full transcript or expected output.
+
+
+=== Source: lab-up.log / cluster creation ===
++ kind create cluster --name ops-lab --config <project-root>/kind/cluster.yaml --kubeconfig <project-root>/.local/kubeconfig --wait 180s
+Creating cluster "ops-lab" ...
+ • Ensuring node image (kindest/node:v1.34.11) 🖼️  ...
+ ✓ Ensuring node image (kindest/node:v1.34.11) 🖼️
+ • Preparing nodes 📦 📦   ...
+ ✓ Preparing nodes 📦 📦
+ • Writing configuration 📜  ...
+ ✓ Writing configuration 📜
+ • Starting control-plane 🕹️  ...
+ ✓ Starting control-plane 🕹️
+ • Installing CNI 🔌  ...
+ ✓ Installing CNI 🔌
+ • Installing StorageClass 💾  ...
+ ✓ Installing StorageClass 💾
+ • Joining worker nodes 🚜  ...
+ ✓ Joining worker nodes 🚜
+ • Waiting ≤ 3m0s for control-plane = Ready ⏳  ...
+ ✓ Waiting ≤ 3m0s for control-plane = Ready ⏳
+ • Ready after 8s 💚
+Set kubectl context to "kind-ops-lab"
+You can now use your cluster with:
+
+kubectl cluster-info --context kind-ops-lab --kubeconfig <project-root>/.local/kubeconfig
+
+Thanks for using kind! 😊
+
+=== Source: lab-up.log / server-side validation ===
+namespace/ops-lab created
+deployment.apps/ops-lab created (server dry run)
+namespace/ops-lab unchanged (server dry run)
+service/ops-lab created (server dry run)
+
+=== Source: lab-recovery.log / observed failure ===
+Observed real ImagePullBackOff: ops-lab-5cb4998469-zj64r
++ kubectl --kubeconfig <project-root>/.local/kubeconfig --context kind-ops-lab --namespace ops-lab --request-timeout=20s get pods -o wide
+NAME                       READY   STATUS             RESTARTS      AGE     IP           NODE             NOMINATED NODE   READINESS GATES
+ops-lab-5cb4998469-zj64r   0/1     ImagePullBackOff   0             21s     10.244.1.4   ops-lab-worker   <none>           <none>
+ops-lab-74475f797-br879    1/1     Running            2 (51s ago)   9m29s   10.244.1.3   ops-lab-worker   <none>           <none>
+ops-lab-74475f797-cmdxv    1/1     Running            2 (51s ago)   9m29s   10.244.1.2   ops-lab-worker   <none>           <none>
+
+  Warning  Failed     6s (x2 over 20s)  kubelet            Failed to pull image "registry.invalid/ops-lab:missing": failed to pull and unpack image "registry.invalid/ops-lab:missing": failed to resolve reference "registry.invalid/ops-lab:missing": failed to do request: Head "https://registry.invalid/v2/ops-lab/manifests/missing": dial tcp: lookup registry.invalid on 172.19.0.1:53: no such host
+
+=== Source: lab-recovery.log / healthy old replicas and rollback ===
+=== Healthy old replicas should still serve HTTP ===
+/ {"service": "ops-lab", "version": "1.0.0", "hostname": "ops-lab-74475f797-cmdxv"}
+/healthz {"status": "ok"}
+/readyz {"status": "ok"}
+HTTP smoke passed
+
+=== Rollback and complete verification ===
++ kubectl --kubeconfig <project-root>/.local/kubeconfig --context kind-ops-lab --namespace ops-lab --request-timeout=20s get deployment/ops-lab -o json
++ kubectl --kubeconfig <project-root>/.local/kubeconfig --context kind-ops-lab --namespace ops-lab --request-timeout=20s rollout undo deployment/ops-lab
+deployment.apps/ops-lab rolled back
++ kubectl --kubeconfig <project-root>/.local/kubeconfig --context kind-ops-lab --namespace ops-lab --request-timeout=20s wait --for=condition=Ready nodes --all --timeout=120s
+node/ops-lab-control-plane condition met
+node/ops-lab-worker condition met
++ kubectl --kubeconfig <project-root>/.local/kubeconfig --context kind-ops-lab --namespace ops-lab --request-timeout=20s get nodes -o json
++ kubectl --kubeconfig <project-root>/.local/kubeconfig --context kind-ops-lab --namespace ops-lab --request-timeout=20s rollout status deployment/ops-lab --timeout=180s
+deployment "ops-lab" successfully rolled out
++ kubectl --kubeconfig <project-root>/.local/kubeconfig --context kind-ops-lab --namespace ops-lab --request-timeout=20s wait --for=condition=Ready pods -l app=ops-lab --timeout=120s
+pod/ops-lab-74475f797-br879 condition met
+pod/ops-lab-74475f797-cmdxv condition met
++ kubectl --kubeconfig <project-root>/.local/kubeconfig --context kind-ops-lab --namespace ops-lab --request-timeout=20s get deployment/ops-lab -o json
++ kubectl --kubeconfig <project-root>/.local/kubeconfig --context kind-ops-lab --namespace ops-lab --request-timeout=20s get pods -o wide
+NAME                      READY   STATUS    RESTARTS      AGE     IP           NODE             NOMINATED NODE   READINESS GATES
+ops-lab-74475f797-br879   1/1     Running   2 (60s ago)   9m38s   10.244.1.3   ops-lab-worker   <none>           <none>
+ops-lab-74475f797-cmdxv   1/1     Running   2 (60s ago)   9m38s   10.244.1.2   ops-lab-worker   <none>           <none>
+/ {"service": "ops-lab", "version": "1.0.0", "hostname": "ops-lab-74475f797-cmdxv"}
+/healthz {"status": "ok"}
+/readyz {"status": "ok"}
+HTTP smoke passed
+
+=== Current node and deployment state ===
+NAME                    STATUS   ROLES           AGE   VERSION
+ops-lab-control-plane   Ready    control-plane   10m   v1.34.11
+ops-lab-worker          Ready    <none>          10m   v1.34.11
+NAME                      READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/ops-lab   2/2     2            2           9m40s
+
+NAME                          READY   STATUS    RESTARTS      AGE
+pod/ops-lab-74475f797-br879   1/1     Running   2 (62s ago)   9m40s
+pod/ops-lab-74475f797-cmdxv   1/1     Running   2 (62s ago)   9m40s
+
+NAME              TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+service/ops-lab   ClusterIP   10.96.154.111   <none>        8080/TCP   9m40s
+
+=== Source: lab-final-check.log / DNS and ClusterIP ===
+=== DNS and ClusterIP from an application Pod ===
+Service DNS: 10.96.154.111
+ClusterIP HTTP: 200 {'service': 'ops-lab', 'version': '1.0.0', 'hostname': 'ops-lab-74475f797-cmdxv'}
+
+=== Source: lab-final-check.log / tests and final resources ===
+Ran 15 tests in 1.751s
+
+OK
+All checks passed!
+6 files already formatted
+
+=== Snapshot time and resources ===
+2026-10-27T16:16:05+07:00
+               total        used        free      shared  buff/cache   available
+Mem:           3.5Gi       1.2Gi       917Mi        51Mi       1.5Gi       2.3Gi
+Swap:          4.0Gi          0B       4.0Gi
+CONTAINER ID   NAME                    CPU %     MEM USAGE / LIMIT     MEM %     NET I/O          BLOCK I/O        PIDS
+c5759bd2f9ac   ops-lab-worker          18.94%    246.4MiB / 3.501GiB   6.87%     721kB / 287kB    237MB / 2.7MB    123
+4bdbb9287dbc   ops-lab-control-plane   251.25%   570.2MiB / 3.501GiB   15.90%    563kB / 1.55MB   501MB / 33.5MB   292
+5.2G	/var/lib/ops-lab-docker
+359M	/opt/ops-lab
