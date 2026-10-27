@@ -143,14 +143,41 @@ def smoke():
                 process.wait(timeout=5)
 
 
+def wait_for_ready_pods(timeout=120):
+    """Wait for desired-image replicas, not obsolete Pods left by rollback."""
+    deadline = time.monotonic() + timeout
+    ready = []
+    while time.monotonic() < deadline:
+        pods = json.loads(kube("get", "pods", "-l", "app=ops-lab", "-o", "json", capture=True))[
+            "items"
+        ]
+        ready = [
+            pod
+            for pod in pods
+            if not pod.get("metadata", {}).get("deletionTimestamp")
+            and any(
+                container.get("name") == "app" and container.get("image") == IMAGE
+                for container in pod.get("spec", {}).get("containers", [])
+            )
+            and any(
+                condition.get("type") == "Ready" and condition.get("status") == "True"
+                for condition in pod.get("status", {}).get("conditions", [])
+            )
+        ]
+        if len(ready) == 2:
+            return
+        time.sleep(1)
+    raise RuntimeError(f"Expected two Ready non-terminating Pods using {IMAGE}; found {len(ready)}")
+
+
 def verify():
     kube("wait", "--for=condition=Ready", "nodes", "--all", "--timeout=120s")
     nodes = json.loads(kube("get", "nodes", "-o", "json", capture=True))["items"]
     if len(nodes) != 2:
         raise RuntimeError("Expected exactly two nodes")
     kube("rollout", "status", "deployment/ops-lab", "--timeout=180s")
-    # Deployment status can briefly be stale after a node/WSL restart.
-    kube("wait", "--for=condition=Ready", "pods", "-l", "app=ops-lab", "--timeout=120s")
+    # Deployment status can be stale; old failed/terminating Pods need not become Ready.
+    wait_for_ready_pods()
     deployment = json.loads(kube("get", "deployment/ops-lab", "-o", "json", capture=True))
     if deployment["status"].get("availableReplicas", 0) != 2:
         raise RuntimeError("Expected two available replicas")

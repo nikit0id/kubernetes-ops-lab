@@ -1,4 +1,5 @@
 import http.client
+import json
 import subprocess
 import sys
 import tempfile
@@ -34,20 +35,67 @@ class LabSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Missing tools: docker, kind, kubectl"):
                 lab.doctor()
 
+    @staticmethod
+    def pod(name, ready, image=lab.IMAGE, deleting=False):
+        return {
+            "metadata": {
+                "name": name,
+                **({"deletionTimestamp": "2026-01-01T00:00:00Z"} if deleting else {}),
+            },
+            "spec": {"containers": [{"name": "app", "image": image}]},
+            "status": {"conditions": [{"type": "Ready", "status": "True" if ready else "False"}]},
+        }
+
     def test_verify_waits_for_actual_pod_readiness(self):
+        snapshots = [
+            [self.pod("one", True), self.pod("two", False)],
+            [self.pod("one", True), self.pod("two", True)],
+        ]
+        reads = []
+
         def output(*args, **kwargs):
             if args[:2] == ("get", "nodes"):
                 return '{"items": [{}, {}]}'
             if args[:2] == ("get", "deployment/ops-lab"):
                 return '{"status":{"availableReplicas":2},"spec":{"template":{"spec":{"containers":[{"image":"ops-lab:1.0.0"}]}}}}'
+            if args == ("get", "pods", "-l", "app=ops-lab", "-o", "json"):
+                result = snapshots[len(reads)]
+                reads.append(result)
+                return json.dumps({"items": result})
             return ""
 
-        with patch("scripts.lab.kube", side_effect=output) as kube:
-            with patch("scripts.lab.smoke"):
-                lab.verify()
-        kube.assert_any_call(
-            "wait", "--for=condition=Ready", "pods", "-l", "app=ops-lab", "--timeout=120s"
-        )
+        with patch("scripts.lab.kube", side_effect=output):
+            with patch("scripts.lab.smoke") as smoke:
+                with patch("scripts.lab.time.sleep"):
+                    lab.verify()
+        self.assertEqual(len(reads), 2)
+        smoke.assert_called_once()
+
+    def test_verify_ignores_failed_and_terminating_old_pods(self):
+        pods = [
+            self.pod("one", True),
+            self.pod("two", True),
+            self.pod("failed", False, lab.BAD_IMAGE),
+            self.pod("terminating", True, deleting=True),
+        ]
+
+        def output(*args, **kwargs):
+            if args[0] == "wait" and "pods" in args:
+                raise subprocess.CalledProcessError(1, args, "old Pod never becomes Ready")
+            if args[:2] == ("get", "nodes"):
+                return '{"items": [{}, {}]}'
+            if args[:2] == ("get", "deployment/ops-lab"):
+                return '{"status":{"availableReplicas":2},"spec":{"template":{"spec":{"containers":[{"image":"ops-lab:1.0.0"}]}}}}'
+            if args == ("get", "pods", "-l", "app=ops-lab", "-o", "json"):
+                return json.dumps({"items": pods})
+            return ""
+
+        with patch("scripts.lab.kube", side_effect=output):
+            with patch("scripts.lab.smoke") as smoke:
+                with patch("scripts.lab.time.monotonic", side_effect=[0, 0, 121]):
+                    with patch("scripts.lab.time.sleep"):
+                        lab.verify()
+        smoke.assert_called_once()
 
     def test_smoke_retries_temporary_remote_disconnect(self):
         from unittest.mock import MagicMock
