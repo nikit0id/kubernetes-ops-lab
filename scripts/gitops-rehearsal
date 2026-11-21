@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exercise a real git push into an isolated, read-only HTTP mirror for Argo CD.
+# Exercise a real git push into an isolated, read-only Git mirror for Argo CD.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 lab="$PWD/portfolio/.lab"
@@ -9,15 +9,19 @@ kind create cluster --name portfolio-gitops --config portfolio/cluster/kind.yml 
 git clone -q --bare --no-hardlinks . "$lab/config.git"
 git --git-dir="$lab/config.git" update-ref refs/heads/promotion "$(git rev-parse HEAD)"
 git --git-dir="$lab/config.git" symbolic-ref HEAD refs/heads/promotion
-git --git-dir="$lab/config.git" update-server-info
+touch "$lab/config.git/git-daemon-export-ok"
 gateway=$(docker network inspect kind | jq -er '.[0].IPAM.Config | map(.Gateway | strings | select(test("^[0-9.]+$"))) | first')
-python3 -m http.server 17883 --directory "$lab/config.git" --bind "$gateway" > "$lab/git-http.log" 2>&1 &
+git daemon --reuseaddr --listen="$gateway" --port=17883 --base-path="$lab" --strict-paths \
+    "$lab/config.git" > "$lab/git-server.log" 2>&1 &
 server_pid=$!
 trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-export PORTFOLIO_GIT_URL="http://$gateway:17883"
+export PORTFOLIO_GIT_URL="git://$gateway:17883/config.git"
 export PORTFOLIO_GIT_REF=promotion
-curl -fsS --retry 6 --retry-connrefused --retry-delay 1 "$PORTFOLIO_GIT_URL/info/refs" | grep -F refs/heads/promotion
-git ls-remote --exit-code "$PORTFOLIO_GIT_URL" refs/heads/promotion
+for attempt in $(seq 1 10); do
+    if git ls-remote --exit-code "$PORTFOLIO_GIT_URL" refs/heads/promotion; then break; fi
+    if [[ $attempt == 10 ]]; then exit 1; fi
+    sleep 1
+done
 scripts/portfolio-up
 git clone -q "$lab/config.git" "$lab/changes"
 
@@ -29,7 +33,6 @@ sed -i "s/tag: $old/tag: $tag/" "$lab/changes/portfolio/chart/values-lab.yaml"
 git -C "$lab/changes" add portfolio/chart/values-lab.yaml
 git -C "$lab/changes" -c user.name='Portfolio CI' -c user.email='portfolio-ci@users.noreply.github.com' commit -qm 'Promote the rehearsed API tag'
 git -C "$lab/changes" push -q origin promotion
-git --git-dir="$lab/config.git" update-server-info
 new=$(git -C "$lab/changes" rev-parse HEAD)
 kubectl -n argocd annotate app portfolio argocd.argoproj.io/refresh=hard --overwrite
 kubectl -n argocd wait app/portfolio --for=jsonpath='{.status.sync.revision}'="$new" --timeout=6m

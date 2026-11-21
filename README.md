@@ -33,7 +33,7 @@ flowchart LR
 
 При `PORTFOLIO_IMAGE_MODE=registry ./scripts/portfolio-up` Argo CD читает chart из этого репозитория, а файл образа — из ветки gitops-values репозитория доставки. Там compose-app-cicd публикует тег и digest после успешного тестового деплоя. Если пакет GHCR закрыт, передайте путь к отдельному docker config.json с правом чтения только этого пакета через PORTFOLIO_DOCKER_CONFIG. Для переключения режимов используйте новый одноразовый кластер.
 
-Для просмотра ресурсов: `KUBECONFIG=portfolio/.lab/kubeconfig kubectl -n portfolio get all`. CI проверяет настоящий git push в одноразовое HTTP-зеркало репозитория и ждёт, пока Argo CD сменит тег, а /health подтвердит доступность базы. Два тестовых тега указывают на одну сборку. В рабочем режиме каждый релиз привязан к digest из GHCR.
+Для просмотра ресурсов: `KUBECONFIG=portfolio/.lab/kubeconfig kubectl -n portfolio get all`. CI проверяет настоящий git push в одноразовое Git-зеркало репозитория и ждёт, пока Argo CD сменит тег, а /health подтвердит доступность базы. Два тестовых тега указывают на одну сборку. В рабочем режиме каждый релиз привязан к digest из GHCR.
 
 ### Что я узнал
 
