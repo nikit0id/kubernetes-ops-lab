@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Exercise a real git push into an isolated, read-only Git mirror for Argo CD.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+lab="$PWD/portfolio/.lab"
+mkdir -p "$lab"
+export KUBECONFIG="$lab/kubeconfig"
+kind create cluster --name portfolio-gitops --config portfolio/cluster/kind.yml --kubeconfig "$KUBECONFIG" --wait 180s
+git clone -q --bare --no-hardlinks . "$lab/config.git"
+git --git-dir="$lab/config.git" update-ref refs/heads/promotion "$(git rev-parse HEAD)"
+git --git-dir="$lab/config.git" symbolic-ref HEAD refs/heads/promotion
+touch "$lab/config.git/git-daemon-export-ok"
+gateway=$(docker network inspect kind | jq -er '.[0].IPAM.Config | map(.Gateway | strings | select(test("^[0-9.]+$"))) | first')
+git daemon --reuseaddr --listen="$gateway" --port=17883 --base-path="$lab" --strict-paths \
+    "$lab/config.git" > "$lab/git-server.log" 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+export PORTFOLIO_GIT_URL="git://$gateway:17883/config.git"
+export PORTFOLIO_GIT_REF=promotion
+for attempt in $(seq 1 10); do
+    if git ls-remote --exit-code "$PORTFOLIO_GIT_URL" refs/heads/promotion; then break; fi
+    if [[ $attempt == 10 ]]; then exit 1; fi
+    sleep 1
+done
+scripts/portfolio-up
+git clone -q "$lab/config.git" "$lab/changes"
+
+old=$(awk '$1=="tag:"{print $2}' portfolio/chart/values-lab.yaml)
+tag="$old-rehearsal"
+docker tag "portfolio-lab/api:$old" "portfolio-lab/api:$tag"
+kind load docker-image --name portfolio-gitops "portfolio-lab/api:$tag"
+sed -i "s/tag: $old/tag: $tag/" "$lab/changes/portfolio/chart/values-lab.yaml"
+git -C "$lab/changes" add portfolio/chart/values-lab.yaml
+git -C "$lab/changes" -c user.name='Portfolio CI' -c user.email='portfolio-ci@users.noreply.github.com' commit -qm 'Promote the rehearsed API tag'
+git -C "$lab/changes" push -q origin promotion
+new=$(git -C "$lab/changes" rev-parse HEAD)
+kubectl -n argocd annotate app portfolio argocd.argoproj.io/refresh=hard --overwrite
+kubectl -n argocd wait app/portfolio --for=jsonpath='{.status.sync.revision}'="$new" --timeout=6m
+kubectl -n portfolio wait deploy/portfolio-api \
+    --for=jsonpath='{.spec.template.spec.containers[0].image}'="portfolio-lab/api:$tag" --timeout=5m
+kubectl -n portfolio rollout status deploy/portfolio-api --timeout=5m
+kubectl -n argocd wait app/portfolio --for=jsonpath='{.status.sync.status}'=Synced --timeout=3m
+test "$(kubectl -n portfolio get deploy portfolio-api -o jsonpath='{.spec.template.spec.containers[0].image}')" = "portfolio-lab/api:$tag"
+kubectl -n portfolio port-forward svc/portfolio-api 18087:80 > "$lab/forward.log" 2>&1 &
+forward_pid=$!
+trap 'kill "$server_pid" "$forward_pid" 2>/dev/null || true' EXIT
+curl -fsS --retry 12 --retry-connrefused --retry-delay 1 http://127.0.0.1:18087/health | jq -e '.status=="ok"'
+echo "Argo CD synchronized pushed revision $new; API serves tag $tag"
+kubectl -n portfolio get all

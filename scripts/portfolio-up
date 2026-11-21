@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+lab="$PWD/portfolio/.lab"
+mkdir -p "$lab"
+chmod 700 "$lab"
+export KUBECONFIG="$lab/kubeconfig"
+name=portfolio-gitops
+if ! kind get clusters | grep -Fxq "$name"; then
+    kind create cluster --name "$name" --config portfolio/cluster/kind.yml --kubeconfig "$KUBECONFIG" --wait 180s
+fi
+kind get kubeconfig --name "$name" > "$KUBECONFIG"
+chmod 600 "$KUBECONFIG"
+[[ $(kubectl config current-context) == "kind-$name" ]]
+repo=${PORTFOLIO_GIT_URL:-https://github.com/nikit0id/kubernetes-ops-lab.git}
+revision=${PORTFOLIO_GIT_REF:-main}
+values='values-lab.yaml'
+if [[ ${PORTFOLIO_IMAGE_MODE:-source} == registry ]]; then
+    values=values.yaml
+else
+    ref=$(awk '$1=="tag:"{print $2}' portfolio/chart/values-lab.yaml)
+    [[ $ref =~ ^[0-9a-f]{40}$ ]]
+    if [[ ! -d $lab/api/.git ]]; then git init -q "$lab/api"; fi
+    git -C "$lab/api" fetch -q --depth 1 https://github.com/nikit0id/portfolio-api.git "$ref"
+    git -C "$lab/api" checkout -q --detach FETCH_HEAD
+    docker build -t "portfolio-lab/api:$ref" "$lab/api"
+    kind load docker-image --name "$name" "portfolio-lab/api:$ref"
+fi
+kubectl create namespace portfolio --dry-run=client -o yaml | kubectl apply -f -
+if ! kubectl -n portfolio get secret portfolio-db >/dev/null 2>&1; then
+    openssl rand -hex 32 | tr -d '\n' | kubectl -n portfolio create secret generic portfolio-db --from-file=password=/dev/stdin
+fi
+if [[ -n ${PORTFOLIO_DOCKER_CONFIG:-} ]]; then
+    kubectl -n portfolio create secret generic ghcr --type=kubernetes.io/dockerconfigjson \
+        --from-file=".dockerconfigjson=$PORTFOLIO_DOCKER_CONFIG" --dry-run=client -o yaml | kubectl apply -f -
+    kubectl -n portfolio patch serviceaccount default -p '{"imagePullSecrets":[{"name":"ghcr"}]}'
+fi
+helm upgrade --install ingress-nginx ingress-nginx --repo https://kubernetes.github.io/ingress-nginx \
+    --version 4.15.1 -n ingress-nginx --create-namespace --set controller.service.type=ClusterIP --wait --timeout 6m
+helm upgrade --install cert-manager cert-manager --repo https://charts.jetstack.io --version v1.21.3 \
+    -n cert-manager --create-namespace --set crds.enabled=true --wait --timeout 6m
+helm upgrade --install monitoring kube-prometheus-stack --repo https://prometheus-community.github.io/helm-charts \
+    --version 93.6.1 -n monitoring --create-namespace -f portfolio/cluster/monitoring.yaml --wait --timeout 10m
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.1/components.yaml
+# The kind kubelet serving certificate is self-signed.
+kubectl -n kube-system patch deploy metrics-server --type=json \
+    -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.2/manifests/install.yaml
+kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=6m
+kubectl -n argocd rollout status deployment/argocd-repo-server --timeout=6m
+# The Application template supplies the production repository and default branch.
+if [[ $values == values.yaml ]]; then
+    kubectl apply -f portfolio/cluster/registry-application.yaml
+else
+    kubectl patch --local -f portfolio/cluster/application.yaml --type=merge \
+        -p "$(jq -n --arg repo "$repo" --arg ref "$revision" --arg file "$values" \
+          '{spec:{source:{repoURL:$repo,targetRevision:$ref,helm:{valueFiles:[$file]}}}}')" -o yaml | kubectl apply -f -
+fi
+kubectl -n argocd wait application/portfolio --for=jsonpath='{.status.sync.status}'=Synced --timeout=7m
+kubectl -n portfolio rollout status deployment/portfolio-api --timeout=6m
+kubectl -n portfolio wait certificate/portfolio-tls --for=condition=Ready --timeout=4m
+kubectl -n portfolio wait hpa/portfolio-api --for=condition=ScalingActive --timeout=4m
+kubectl -n portfolio get all

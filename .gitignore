@@ -7,3 +7,5 @@ __pycache__/
 .env.*
 *.pem
 *.key
+
+portfolio/.lab/

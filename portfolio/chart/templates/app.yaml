@@ -8,9 +8,13 @@ spec:
   template:
     metadata:
       labels: {app: portfolio-api}
-      annotations:
-        portfolio/revision: {{ .Values.rolloutMarker | quote }}
     spec:
+      initContainers:
+        - name: database-ready
+          image: postgres:17-alpine
+          envFrom:
+            - configMapRef: {name: portfolio-api}
+          command: [sh, -ec, 'until pg_isready -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -t 2; do sleep 2; done']
       containers:
         - name: api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"

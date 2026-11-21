@@ -1,0 +1,8 @@
+# Short retention suits the ephemeral kind runner.
+prometheus:
+  prometheusSpec:
+    retention: 6h
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+grafana:
+  defaultDashboardsTimezone: utc
