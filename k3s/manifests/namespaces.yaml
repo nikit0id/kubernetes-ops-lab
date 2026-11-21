@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+  labels:
+    app.kubernetes.io/part-of: kubernetes-ops-lab
+    app.kubernetes.io/component: ingress
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  labels:
+    app.kubernetes.io/part-of: kubernetes-ops-lab
+    app.kubernetes.io/component: certificates
