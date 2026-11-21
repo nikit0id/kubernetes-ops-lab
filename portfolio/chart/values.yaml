@@ -1,0 +1,14 @@
+image:
+  repository: ghcr.io/nikit0id/portfolio-api
+  tag: fbd68386b555aef7d7ca19d0bac653344e7bca0b
+  digest: sha256:dffac91f32a67f1569251593704c7ba9b4a1014111cc577ef9052630bf8ff285
+database:
+  existingSecret: portfolio-db
+  password: ""
+  size: 1Gi
+ingress:
+  enabled: true
+  host: portfolio.localhost
+monitoring:
+  enabled: true
+rolloutMarker: initial
