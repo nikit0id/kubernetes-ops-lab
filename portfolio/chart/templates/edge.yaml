@@ -1,0 +1,40 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: lab-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: portfolio-api
+  annotations:
+    cert-manager.io/issuer: lab-selfsigned
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [{{ .Values.ingress.host }}]
+      secretName: portfolio-tls
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: {name: portfolio-api, port: {name: http}}
+{{- end }}
+{{- if .Values.monitoring.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: portfolio-api
+  labels: {release: monitoring}
+spec:
+  selector:
+    matchLabels: {app: portfolio-api}
+  endpoints: [{port: http, path: /metrics, interval: 15s}]
+{{- end }}

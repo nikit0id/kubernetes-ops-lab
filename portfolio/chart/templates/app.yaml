@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: portfolio-api
+spec:
+  selector:
+    matchLabels: {app: portfolio-api}
+  template:
+    metadata:
+      labels: {app: portfolio-api}
+      annotations:
+        portfolio/revision: {{ .Values.rolloutMarker | quote }}
+    spec:
+      containers:
+        - name: api
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}{{ with .Values.image.digest }}@{{ . }}{{ end }}"
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          envFrom:
+            - configMapRef: {name: portfolio-api}
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.database.existingSecret | default "portfolio-db" }}, key: password}
+          ports: [{name: http, containerPort: 8000}]
+          resources:
+            requests: {cpu: 100m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 3
+            failureThreshold: 40
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+          livenessProbe:
+            tcpSocket: {port: http}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: portfolio-api
+  labels: {app: portfolio-api}
+spec:
+  selector: {app: portfolio-api}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: portfolio-api
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: portfolio-api}
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 70}
