@@ -60,4 +60,5 @@ fi
 kubectl -n argocd wait application/portfolio --for=jsonpath='{.status.sync.status}'=Synced --timeout=7m
 kubectl -n portfolio rollout status deployment/portfolio-api --timeout=6m
 kubectl -n portfolio wait certificate/portfolio-tls --for=condition=Ready --timeout=4m
+kubectl -n portfolio wait hpa/portfolio-api --for=condition=ScalingActive --timeout=4m
 kubectl -n portfolio get all

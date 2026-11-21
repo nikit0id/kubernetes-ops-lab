@@ -36,7 +36,10 @@ git -C "$lab/changes" push -q origin promotion
 new=$(git -C "$lab/changes" rev-parse HEAD)
 kubectl -n argocd annotate app portfolio argocd.argoproj.io/refresh=hard --overwrite
 kubectl -n argocd wait app/portfolio --for=jsonpath='{.status.sync.revision}'="$new" --timeout=6m
+kubectl -n portfolio wait deploy/portfolio-api \
+    --for=jsonpath='{.spec.template.spec.containers[0].image}'="portfolio-lab/api:$tag" --timeout=5m
 kubectl -n portfolio rollout status deploy/portfolio-api --timeout=5m
+kubectl -n argocd wait app/portfolio --for=jsonpath='{.status.sync.status}'=Synced --timeout=3m
 test "$(kubectl -n portfolio get deploy portfolio-api -o jsonpath='{.spec.template.spec.containers[0].image}')" = "portfolio-lab/api:$tag"
 kubectl -n portfolio port-forward svc/portfolio-api 18087:80 > "$lab/forward.log" 2>&1 &
 forward_pid=$!
