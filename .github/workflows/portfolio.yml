@@ -13,3 +13,32 @@ jobs:
       - run: |
           helm lint portfolio/chart
           helm template portfolio portfolio/chart >/dev/null
+  gitops:
+    needs: chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install the pinned kind binary
+        run: |
+          cd "$RUNNER_TEMP"
+          base=https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0
+          curl -fsSLO "$base/kind-linux-amd64"
+          curl -fsSLO "$base/kind-linux-amd64.sha256sum"
+          sha256sum --check kind-linux-amd64.sha256sum
+          mkdir -p "$RUNNER_TEMP/tools"
+          install -m 0755 kind-linux-amd64 "$RUNNER_TEMP/tools/kind"
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - run: |
+          shellcheck scripts/portfolio-up scripts/gitops-rehearsal
+          scripts/gitops-rehearsal
+      - name: Show cluster diagnostics
+        if: failure()
+        env:
+          KUBECONFIG: ${{ github.workspace }}/portfolio/.lab/kubeconfig
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n argocd get application portfolio -o yaml || true
+          kubectl get events -A --sort-by='.lastTimestamp' | tail -80

@@ -8,8 +8,6 @@ spec:
   template:
     metadata:
       labels: {app: portfolio-api}
-      annotations:
-        portfolio/revision: {{ .Values.rolloutMarker | quote }}
     spec:
       containers:
         - name: api

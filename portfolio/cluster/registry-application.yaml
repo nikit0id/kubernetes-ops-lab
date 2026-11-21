@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: portfolio
+  namespace: argocd
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/nikit0id/kubernetes-ops-lab.git
+      targetRevision: main
+      path: portfolio/chart
+      helm:
+        valueFiles: [$release/portfolio-values.yaml]
+    - repoURL: https://github.com/nikit0id/compose-app-cicd.git
+      targetRevision: gitops-values
+      ref: release
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: portfolio
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]

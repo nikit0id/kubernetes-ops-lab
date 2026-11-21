@@ -11,4 +11,3 @@ ingress:
   host: portfolio.localhost
 monitoring:
   enabled: true
-rolloutMarker: initial

@@ -6,6 +6,46 @@
 
 **Статус:** проект проверен на реальном локальном стенде WSL2: Docker build, два Ready-узла, две реплики, HTTP, DNS/ClusterIP, воспроизведение ImagePullBackOff и rollback. Все 16 тестов прошли на Windows и Linux. Текущий результат GitHub Actions — по значку CI выше. Подробности и ссылки на реальные запуски — [docs/verification.md](docs/verification.md). Это учебный стенд, не production-инфраструктура.
 
+## Portfolio API через GitOps
+
+[![Portfolio GitOps](https://github.com/nikit0id/kubernetes-ops-lab/actions/workflows/portfolio.yml/badge.svg?branch=main)](https://github.com/nikit0id/kubernetes-ops-lab/actions/workflows/portfolio.yml)
+
+Второй стенд этого репозитория развёртывает общий FastAPI и PostgreSQL. Для него нужен Linux с Docker, kind v0.33, kubectl, Helm 3, Git, jq и OpenSSL. Команды создают отдельный кластер portfolio-gitops и kubeconfig в portfolio/.lab.
+
+```bash
+git clone https://github.com/nikit0id/kubernetes-ops-lab.git
+cd kubernetes-ops-lab
+./scripts/portfolio-up
+```
+
+```mermaid
+flowchart LR
+  Delivery[compose-app-cicd] -->|тег и digest| Values[Ветка gitops-values]
+  Chart[Helm chart] --> ArgoCD
+  Values --> ArgoCD
+  ArgoCD --> API[FastAPI + HPA]
+  Nginx[Ingress Nginx + cert-manager] --> API
+  API --> PG[PostgreSQL StatefulSet + PVC]
+  Prom[kube-prometheus-stack] -->|ServiceMonitor| API
+```
+
+**Что внутри.** По умолчанию стенд собирает закреплённую ревизию portfolio-api и загружает образ в kind. PostgreSQL получает отдельный PVC, пароль генерируется один раз в Kubernetes Secret. HPA использует metrics-server, ServiceMonitor поставляет метрики в Prometheus. Лабораторный Ingress получает локальный сертификат. Для реального домена потребуется доверенный Issuer.
+
+При `PORTFOLIO_IMAGE_MODE=registry ./scripts/portfolio-up` Argo CD читает chart из этого репозитория, а файл образа — из ветки gitops-values репозитория доставки. Там compose-app-cicd публикует тег и digest после успешного тестового деплоя. Если пакет GHCR закрыт, передайте путь к отдельному docker config.json с правом чтения только этого пакета через PORTFOLIO_DOCKER_CONFIG. Для переключения режимов используйте новый одноразовый кластер.
+
+Для просмотра ресурсов: `KUBECONFIG=portfolio/.lab/kubeconfig kubectl -n portfolio get all`. CI проверяет настоящий git push в одноразовое HTTP-зеркало репозитория и ждёт, пока Argo CD сменит тег, а /health подтвердит доступность базы. Два тестовых тега указывают на одну сборку. В рабочем режиме каждый релиз привязан к digest из GHCR.
+
+### Что я узнал
+
+- TCP liveness проверяет процесс. HTTP readiness проверяет SQL и исключает неготовый Pod из Service.
+- StatefulSet связывает имя экземпляра PostgreSQL с PVC. Перезапуск Pod сохраняет его файлы.
+- Для подтверждения GitOps нужны SHA синхронизации Argo, фактический образ в Deployment и ответ приложения после rollout.
+
+### Что бы сделал дальше
+
+- Подключить внешний Issuer и внешний тест HTTPS с реальным доменом.
+- Проверить время восстановления PVC из S3-бэкапа на новом кластере.
+
 ## Что реализовано
 
 - Python-сервис без сторонних runtime-зависимостей: `/`, `/healthz`, `/readyz`.
