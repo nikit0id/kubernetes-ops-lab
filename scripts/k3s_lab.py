@@ -20,6 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / ".local" / "k3s"
 KUBECONFIG = STATE / "kubeconfig"
+PORTS_FILE = STATE / "ports.json"
 COMPOSE_FILE = ROOT / "k3s" / "compose" / "docker-compose.yml"
 MANIFESTS = ROOT / "k3s" / "manifests"
 PROJECT = "k3s-lab"
@@ -50,7 +51,18 @@ def run(*args, capture=False, env=None, check=True):
 
 
 def compose(*args, capture=False, check=True, env=None):
-    base = {"K3S_OUTPUT_DIR": str(STATE)}
+    # Compose requires K3S_TOKEN and K3S_VERSION for every subcommand, not only
+    # "up": without them ps/down/logs abort on interpolation before running.
+    base = {
+        "K3S_OUTPUT_DIR": str(STATE),
+        "K3S_TOKEN": write_token(),
+        "K3S_VERSION": k3s_version(),
+        "K3S_API_PORT": "6443",
+        "K3S_HTTP_PORT": "8081",
+        "K3S_HTTPS_PORT": "8443",
+    }
+    if PORTS_FILE.is_file():
+        base.update(json.loads(PORTS_FILE.read_text(encoding="utf-8")))
     return run(
         "docker",
         "compose",
@@ -147,7 +159,7 @@ def up():
         "K3S_HTTPS_PORT": str(free_port(8443)),
     }
     STATE.mkdir(parents=True, exist_ok=True)
-    (STATE / "ports.json").write_text(json.dumps(ports), encoding="utf-8")
+    PORTS_FILE.write_text(json.dumps(ports), encoding="utf-8")
     run("docker", "build", "-t", IMAGE, ".")
     compose(
         "up",
@@ -175,7 +187,7 @@ def rewrite_kubeconfig():
     text = KUBECONFIG.read_text(encoding="utf-8")
     if "certificate-authority-data" not in text:
         return False
-    ports = json.loads((STATE / "ports.json").read_text(encoding="utf-8"))
+    ports = json.loads(PORTS_FILE.read_text(encoding="utf-8"))
     api = f"https://127.0.0.1:{ports['K3S_API_PORT']}"
     # "- name: default" entries keep their dash, so the prefix is part of the match.
     line_pattern = re.compile(
@@ -393,7 +405,7 @@ def verify():
 
 def check_ingress():
     """Request the smoke host over TLS through the published ingress port."""
-    ports = json.loads((STATE / "ports.json").read_text(encoding="utf-8"))
+    ports = json.loads(PORTS_FILE.read_text(encoding="utf-8"))
     port = int(ports["K3S_HTTPS_PORT"])
     authority = f"https://{HOST}:{port}"
     deadline = time.monotonic() + 180
