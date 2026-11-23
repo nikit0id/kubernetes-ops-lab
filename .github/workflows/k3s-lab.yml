@@ -2,7 +2,7 @@ name: k3s lab
 
 on:
   push:
-    branches: [feat/k3s-cluster]
+    branches: [main, feat/k3s-cluster]
   pull_request:
     paths: ["k3s/**", "portfolio/**", "scripts/k3s/**", "scripts/k3s_lab.py", "tests/**", ".github/workflows/k3s-lab.yml"]
   workflow_dispatch:
@@ -50,6 +50,12 @@ jobs:
           tar -xzf "$RUNNER_TEMP/tools/helm.tgz" -C "$RUNNER_TEMP/tools"
           install -m 0755 "$RUNNER_TEMP/tools/linux-amd64/helm" "$RUNNER_TEMP/tools/helm"
           echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: Validate the chart and built-in resource schemas
+        run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+          helm lint portfolio/chart -f portfolio/chart/values-k3s.yaml
+          helm template portfolio portfolio/chart -f portfolio/chart/values-k3s.yaml |
+            "$(go env GOPATH)/bin/kubeconform" -strict -summary -kubernetes-version 1.34.0 -skip Issuer,ServiceMonitor
       - name: Bootstrap the three-node cluster
         run: python scripts/k3s_lab.py up
       - name: Verify nodes, DNS, ingress and certificate
@@ -71,6 +77,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ github.event_name == 'push' && secrets.TELEGRAM_BOT_TOKEN || '' }}
           TELEGRAM_CHAT_ID: ${{ github.event_name == 'push' && secrets.TELEGRAM_CHAT_ID || '' }}
         run: bash scripts/k3s/observe.sh 2>&1 | tee docs/evidence/k3s/alerting.log
+      - name: Snapshot healthy workload status before DR
+        shell: bash
+        run: |
+          kubectl --kubeconfig .local/k3s/kubeconfig get pods -A -o wide >docs/evidence/k3s/pre-dr-pods.txt
       - name: Restore etcd and PostgreSQL into fresh volumes
         shell: bash
         run: bash scripts/k3s/dr.sh 2>&1 | tee docs/evidence/k3s/dr.log
@@ -91,6 +101,8 @@ jobs:
         if: failure()
         shell: bash
         run: |
+          export KUBECONFIG="$PWD/.local/k3s/kubeconfig"
+          kubectl -n argocd get app portfolio -o json | jq '{conditions:.status.conditions,sync:.status.sync,health:.status.health}' || true
           kubectl --kubeconfig .local/k3s/kubeconfig get events -A --sort-by=.lastTimestamp | tail -60 || true
           python scripts/k3s_lab.py logs 2>&1 | tail -100 || true
       - uses: actions/upload-artifact@v4

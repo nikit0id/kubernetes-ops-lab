@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: pvc-usage, namespace: portfolio}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: pvc-usage}}
+  template:
+    metadata: {labels: {app: pvc-usage}}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector: {kubernetes.io/hostname: k3s-agent-1}
+      containers:
+        - name: metrics
+          image: ops-lab:1.0.0
+          securityContext: {runAsUser: 999, runAsNonRoot: true, readOnlyRootFilesystem: true}
+          command: [python, /code/pvc_metrics.py]
+          ports: [{name: metrics, containerPort: 9403}]
+          volumeMounts:
+            - {name: claim, mountPath: /claim, readOnly: true}
+            - {name: code, mountPath: /code, readOnly: true}
+      volumes:
+        - name: claim
+          persistentVolumeClaim: {claimName: data-portfolio-postgres-0, readOnly: true}
+        - name: code
+          configMap: {name: pvc-metrics-code}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: pvc-usage, namespace: portfolio, labels: {app: pvc-usage}}
+spec:
+  selector: {app: pvc-usage}
+  ports: [{name: metrics, port: 9403}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata: {name: pvc-usage, namespace: portfolio, labels: {release: monitoring}}
+spec:
+  selector: {matchLabels: {app: pvc-usage}}
+  endpoints: [{port: metrics, interval: 30s}]

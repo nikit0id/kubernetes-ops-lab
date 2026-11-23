@@ -2,3 +2,7 @@ alertmanager:
   alertmanagerSpec:
     alertmanagerConfigSelector:
       matchLabels: {lab: portfolio}
+# The three nodes share a Docker host. Node exporter host mount propagation
+# on a GitHub-hosted runner is not available on every Docker configuration.
+nodeExporter:
+  enabled: false

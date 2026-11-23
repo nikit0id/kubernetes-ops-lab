@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 source scripts/k3s/common.sh
+k create configmap pvc-metrics-code --from-file=scripts/k3s/pvc_metrics.py
+kubectl apply -f k3s/storage-metrics.yaml
+# Discover the controller Service port so this selector follows the installed chart.
+kubectl -n cert-manager get svc cert-manager -o json | jq '{
+  apiVersion:"monitoring.coreos.com/v1",kind:"ServiceMonitor",
+  metadata:{name:"lab-certificates",namespace:"cert-manager",labels:{release:"monitoring"}},
+  spec:{selector:{matchLabels:.metadata.labels},endpoints:[
+    {port:(.spec.ports[]|select(.port==9402)|.name),interval:"30s"}]}}' | kubectl apply -f -
 kubectl apply -f k3s/alerts.yaml
 kubectl -n monitoring create cm portfolio-dashboards --from-file=k3s/dashboards
 kubectl -n monitoring label cm portfolio-dashboards grafana_dashboard=1

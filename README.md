@@ -20,7 +20,24 @@ python scripts/k3s_lab.py verify
 
 `verify` проверяет три Ready-узла, CoreDNS, namespace-ы, условие `Ready` у `Certificate` и реальный HTTPS-ответ через ingress с проверкой цепочки по локальному корневому CA. Подробности, порты, ограничения и удаление — [docs/k3s-cluster.md](docs/k3s-cluster.md).
 
-**Статус этапа:** манифесты, скрипт и проверки покрыты тестами и проходят локально; полный прогон на Docker-хосте с k3s **не выполнялся** в этой среде — Docker здесь недоступен. Фактический результат запуска появится в [docs/verification.md](docs/verification.md) после реального `up`.
+[Прогон bootstrap и TLS в GitHub Actions](https://github.com/nikit0id/kubernetes-ops-lab/actions/runs/45196035552/job/137766758169). На чистом кластере после bootstrap репетиции запускаются в порядке шагов workflow: GitOps, приложение, инциденты, наблюдаемость, DR. Скрипты вызываются из корня репозитория через Bash. Команды и протоколы доступны в [k3s workflow](.github/workflows/k3s-lab.yml).
+
+```mermaid
+flowchart TD
+  Release["Образ и digest"] --> Values["gitops-values"]
+  Values --> Mirror["Тестовая ветка"]
+  Mirror --> Argo["Argo CD"]
+  Argo --> API["API и HPA"]
+  API --> DB["PostgreSQL и local-path"]
+  DB --> Dump["Логический дамп"]
+  Etcd["Embedded etcd"] --> Snap["Snapshot и token"]
+  Dump --> Restore["Временный кластер DR"]
+  Snap --> Restore
+  API --> Prom["Prometheus"]
+  Prom --> AM["Alertmanager"]
+```
+
+Для отправки тестового алерта в собственный Telegram-чат используйте секреты репозитория `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID`. При их отсутствии измеряется доставка на внутренний HTTP receiver. После DR публикуются только контрольная строка, RTO/RPO и результат health-check. [Порядок восстановления](docs/dr.md).
 
 ## Portfolio API через GitOps
 
