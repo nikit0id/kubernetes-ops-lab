@@ -89,15 +89,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ github.event_name == 'push' && secrets.TELEGRAM_BOT_TOKEN || '' }}
           TELEGRAM_CHAT_ID: ${{ github.event_name == 'push' && secrets.TELEGRAM_CHAT_ID || '' }}
         run: bash scripts/k3s/observe.sh 2>&1 | tee docs/evidence/k3s/alerting.log
-      - name: Snapshot healthy workload status before DR
-        if: matrix.scenario == 'recovery'
-        shell: bash
-        run: |
-          kubectl --kubeconfig .local/k3s/kubeconfig get pods -A -o wide >docs/evidence/k3s/pre-dr-pods.txt
-      - name: Restore etcd and PostgreSQL into fresh volumes
-        if: ${{ !cancelled() && matrix.scenario == 'recovery' && steps.gitops.outcome == 'success' }}
-        shell: bash
-        run: bash scripts/k3s/dr.sh 2>&1 | tee docs/evidence/k3s/dr.log
       - name: Save evidence
         if: always()
         shell: bash
@@ -111,6 +102,10 @@ jobs:
           kubectl -n smoke get certificate,secret > docs/evidence/k3s/certificate.txt 2>&1 || true
           kubectl -n ingress-nginx get pods -o wide > docs/evidence/k3s/ingress.txt 2>&1 || true
           kubectl get pods -A -o wide > docs/evidence/k3s/pods.txt 2>&1 || true
+      - name: Restore etcd and PostgreSQL into fresh volumes
+        if: ${{ !cancelled() && matrix.scenario == 'recovery' && steps.gitops.outcome == 'success' }}
+        shell: bash
+        run: bash scripts/k3s/dr.sh 2>&1 | tee docs/evidence/k3s/dr.log
       - name: Collect diagnostics on failure
         if: failure()
         shell: bash

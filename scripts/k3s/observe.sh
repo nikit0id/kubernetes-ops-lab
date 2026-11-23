@@ -13,11 +13,27 @@ kubectl -n cert-manager get svc cert-manager -o json | jq '{
 kubectl apply -f k3s/alerts.yaml
 kubectl -n monitoring create cm portfolio-dashboards --from-file=k3s/dashboards
 kubectl -n monitoring label cm portfolio-dashboards grafana_dashboard=1
-dashboards_loaded() {
-    kubectl -n monitoring exec deploy/monitoring-grafana -c grafana -- sh -ec \
-        'for file in api.json operations.json; do find /tmp/dashboards -name "$file" | grep -q .; done'
-}
-until_ok 120 dashboards_loaded
+# Query Grafana itself. Its runtime image has no shell.
+(
+    umask 077
+    auth=$(mktemp "$lab/grafana-auth.XXXXXX")
+    kubectl -n monitoring get secret monitoring-grafana -o json |
+        jq -r '"machine 127.0.0.1 login " + (.data["admin-user"]|@base64d) +
+               " password " + (.data["admin-password"]|@base64d)' >"$auth"
+    kubectl -n monitoring port-forward --address 127.0.0.1 svc/monitoring-grafana :80 >"$lab/grafana.port" 2>&1 &
+    forward=$!
+    trap 'kill "$forward" 2>/dev/null || true; rm -f "$auth"' EXIT
+    dashboards_loaded() {
+        local port uid
+        port=$(sed -nE 's/.*127[.]0[.]0[.]1:([0-9]+) ->.*/\1/p' "$lab/grafana.port" | head -1)
+        [[ -n "$port" ]] || return 1
+        for uid in portfolio-api portfolio-operations; do
+            curl -fsS --max-time 4 --netrc-file "$auth" "http://127.0.0.1:$port/api/dashboards/uid/$uid" |
+                jq -e --arg uid "$uid" '.dashboard.uid==$uid' >/dev/null || return 1
+        done
+    }
+    until_ok 150 dashboards_loaded
+)
 # Receive one synthetic alert and measure elapsed wall time on the same host clock.
 k create configmap alert-receiver --from-file=receiver.py=scripts/k3s/receiver.py
 k run alert-receiver --image=ops-lab:1.0.0 --port=8080 --overrides='{"spec":{"volumes":[{"name":"code","configMap":{"name":"alert-receiver"}}],"containers":[{"name":"alert-receiver","image":"ops-lab:1.0.0","command":["python","-u","/receiver/receiver.py"],"volumeMounts":[{"name":"code","mountPath":"/receiver"}]}]}}'
