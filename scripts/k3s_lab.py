@@ -432,6 +432,12 @@ def check_ingress():
 
 
 def down():
+    registry = "k3s-lab-registry"
+    networks = run("docker", "network", "inspect", "k3s-lab_k3s", capture=True, check=False)
+    if networks and registry in {
+        item.get("Name") for item in json.loads(networks)[0]["Containers"].values()
+    }:
+        run("docker", "rm", "-f", registry)
     compose("down", "--volumes", "--remove-orphans")
     print("Removed k3s-lab containers and volumes; the kind stand is untouched.", flush=True)
 

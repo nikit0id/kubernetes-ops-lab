@@ -21,7 +21,11 @@ export K3S_TOKEN
     done
 } >"$backup/identities.yml"
 dc() { docker compose -p "$project" -f k3s/compose/docker-compose.yml -f "$backup/identities.yml" "$@"; }
-trap 'dc down -v --remove-orphans >/dev/null' EXIT
+cleanup() {
+    docker network disconnect "${project}_k3s" k3s-lab-registry 2>/dev/null || true
+    dc down -v --remove-orphans >/dev/null
+}
+trap cleanup EXIT
 marker="dr-$(date +%s)"
 sql -c 'CREATE TABLE IF NOT EXISTS lab_recovery(id text primary key);'
 sql -c "INSERT INTO lab_recovery VALUES ('$marker');"
@@ -40,6 +44,8 @@ start=$(date +%s)
 if [[ ${GITHUB_ACTIONS:-} == true ]]; then
     docker stop k3s-lab-agent-1-1 k3s-lab-agent-2-1 k3s-lab-server-1 >/dev/null
 fi
+dc create
+docker network connect --alias lab-registry "${project}_k3s" k3s-lab-registry
 dc run --rm --no-deps -v "$backup/etcd.snapshot:/restore/snapshot:ro" server \
     server --cluster-reset --cluster-reset-restore-path=/restore/snapshot
 dc up -d

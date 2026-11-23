@@ -20,6 +20,7 @@ services:
         soft: 65535
         hard: 65535
     volumes:
+      - ../registries.yaml:/etc/rancher/k3s/registries.yaml:ro
       - k3s-server:/var/lib/rancher/k3s
     ports:
       - "127.0.0.1:${K3S_API_PORT:-6443}:6443"
@@ -47,6 +48,7 @@ services:
         soft: 65535
         hard: 65535
     volumes:
+      - ../registries.yaml:/etc/rancher/k3s/registries.yaml:ro
       - k3s-agent-1:/var/lib/rancher/k3s
     networks: [k3s]
 
@@ -58,6 +60,7 @@ services:
       - K3S_TOKEN=${K3S_TOKEN:?err}
       - K3S_NODE_NAME=k3s-agent-2
     volumes:
+      - ../registries.yaml:/etc/rancher/k3s/registries.yaml:ro
       - k3s-agent-2:/var/lib/rancher/k3s
 
 networks:

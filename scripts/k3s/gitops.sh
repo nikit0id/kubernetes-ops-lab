@@ -11,6 +11,29 @@ git --git-dir="$mirror/release.git" symbolic-ref HEAD refs/heads/rehearsal
 git clone -q "$mirror/release.git" "$lab/release"
 git -C "$lab/release" config user.name 'K3s rehearsal'
 git -C "$lab/release" config user.email 'lab@localhost'
+# Resolve the same source revision as the delivered release. Use an isolated
+# registry so a fresh runner never needs read access to a private GHCR package.
+delivery_sha=$(awk '$1=="tag:"{gsub(/"/,"",$2); print $2}' "$lab/release/portfolio-values.yaml")
+[[ "$delivery_sha" =~ ^[0-9a-f]{40}$ ]]
+git init -q "$lab/upstream-delivery"
+git -C "$lab/upstream-delivery" fetch -q --depth=1 https://github.com/nikit0id/compose-app-cicd.git "$delivery_sha"
+source_sha=$(git -C "$lab/upstream-delivery" show FETCH_HEAD:api-revision)
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+git init -q "$lab/upstream-api"
+git -C "$lab/upstream-api" fetch -q --depth=1 https://github.com/nikit0id/portfolio-api.git "$source_sha"
+git init -q --bare "$mirror/source.git"
+git --git-dir="$mirror/source.git" config receive.shallowUpdate true
+docker run -d --name k3s-lab-registry --network k3s-lab_k3s --network-alias lab-registry \
+    -p 127.0.0.1::5000 registry:2.8.3 >/dev/null
+REGISTRY_PORT=$(docker port k3s-lab-registry 5000/tcp | awk -F: '{print $NF}')
+export REGISTRY_PORT
+export BUILD_DIR="$lab/api-build" RELEASE_DIR="$lab/release"
+mkdir "$BUILD_DIR"
+install -m 0755 scripts/k3s/push-source.sh "$mirror/source.git/hooks/post-receive"
+git -C "$lab/upstream-api" push "$mirror/source.git" "$source_sha:refs/heads/rehearsal"
+# Git accepts a push even if its post-receive hook failed.
+grep -Fq "lab-registry:5000/portfolio-api" "$lab/release/portfolio-values.yaml"
+git --git-dir="$mirror/release.git" show rehearsal:portfolio-values.yaml | grep -Fq "$source_sha"
 git clone -q --bare --no-local . "$mirror/chart.git"
 git --git-dir="$mirror/chart.git" update-ref refs/heads/rehearsal "$(git rev-parse HEAD)"
 gateway=$(docker network inspect k3s-lab_k3s | jq -er '.[0].IPAM.Config | map(.Gateway | strings | select(test("^[0-9.]+$"))) | first')

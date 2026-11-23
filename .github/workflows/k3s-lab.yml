@@ -2,10 +2,14 @@ name: k3s lab
 
 on:
   push:
-    branches: [main, feat/k3s-cluster]
+    branches: [main]
   pull_request:
     paths: ["k3s/**", "portfolio/**", "scripts/k3s/**", "scripts/k3s_lab.py", "tests/**", ".github/workflows/k3s-lab.yml"]
   workflow_dispatch:
+
+concurrency:
+  group: k3s-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
