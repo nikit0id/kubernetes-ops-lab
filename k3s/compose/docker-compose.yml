@@ -1,0 +1,72 @@
+# Three-node k3s lab on local Docker: one server with embedded etcd, two agents.
+# Do not run this by hand: scripts/k3s_lab.py up sets the token, version and paths.
+services:
+  server:
+    image: "rancher/k3s:${K3S_VERSION:?err}"
+    hostname: k3s-server
+    # --cluster-init switches the datastore from the default SQLite to embedded etcd.
+    # --disable=traefik leaves ingress to ingress-nginx.
+    command: server --cluster-init --disable=traefik
+    privileged: true
+    restart: "no"
+    environment:
+      - K3S_TOKEN=${K3S_TOKEN:?err}
+    tmpfs:
+      - /run
+      - /var/run
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 65535
+        hard: 65535
+    volumes:
+      - ../registries.yaml:/etc/rancher/k3s/registries.yaml:ro
+      - k3s-server:/var/lib/rancher/k3s
+    ports:
+      - "127.0.0.1:${K3S_API_PORT:-6443}:6443"
+      - "127.0.0.1:${K3S_HTTP_PORT:-8081}:80"
+      - "127.0.0.1:${K3S_HTTPS_PORT:-8443}:443"
+    networks: [k3s]
+
+  agent-1: &agent
+    image: "rancher/k3s:${K3S_VERSION:?err}"
+    hostname: k3s-agent-1
+    command: agent
+    privileged: true
+    restart: "no"
+    depends_on: [server]
+    environment:
+      - K3S_URL=https://server:6443
+      - K3S_TOKEN=${K3S_TOKEN:?err}
+      - K3S_NODE_NAME=k3s-agent-1
+    tmpfs:
+      - /run
+      - /var/run
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 65535
+        hard: 65535
+    volumes:
+      - ../registries.yaml:/etc/rancher/k3s/registries.yaml:ro
+      - k3s-agent-1:/var/lib/rancher/k3s
+    networks: [k3s]
+
+  agent-2:
+    <<: *agent
+    hostname: k3s-agent-2
+    environment:
+      - K3S_URL=https://server:6443
+      - K3S_TOKEN=${K3S_TOKEN:?err}
+      - K3S_NODE_NAME=k3s-agent-2
+    volumes:
+      - ../registries.yaml:/etc/rancher/k3s/registries.yaml:ro
+      - k3s-agent-2:/var/lib/rancher/k3s
+
+networks:
+  k3s: {}
+
+volumes:
+  k3s-server: {}
+  k3s-agent-1: {}
+  k3s-agent-2: {}

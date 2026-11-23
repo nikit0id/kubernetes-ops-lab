@@ -1,0 +1,125 @@
+name: k3s lab
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths: ["k3s/**", "portfolio/**", "scripts/k3s/**", "scripts/k3s_lab.py", "tests/**", ".github/workflows/k3s-lab.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: k3s-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m ruff check .
+      - run: python -m ruff format --check .
+      - run: python -m unittest discover -s tests -v
+
+  cluster:
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [operations, recovery]
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pinned kubectl and helm
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tools"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/tools/kubectl" \
+            https://dl.k8s.io/release/v1.34.11/bin/linux/amd64/kubectl
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/tools/kubectl.sha256" \
+            https://dl.k8s.io/release/v1.34.11/bin/linux/amd64/kubectl.sha256
+          printf '%s  kubectl\n' "$(cat "$RUNNER_TEMP/tools/kubectl.sha256")" |
+            (cd "$RUNNER_TEMP/tools" && sha256sum --check)
+          chmod +x "$RUNNER_TEMP/tools/kubectl"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/tools/helm.tgz" \
+            https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz
+          tar -xzf "$RUNNER_TEMP/tools/helm.tgz" -C "$RUNNER_TEMP/tools"
+          install -m 0755 "$RUNNER_TEMP/tools/linux-amd64/helm" "$RUNNER_TEMP/tools/helm"
+          echo "$RUNNER_TEMP/tools" >> "$GITHUB_PATH"
+      - name: Validate the chart and built-in resource schemas
+        run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+          helm lint portfolio/chart -f portfolio/chart/values-k3s.yaml
+          helm template portfolio portfolio/chart -f portfolio/chart/values-k3s.yaml |
+            "$(go env GOPATH)/bin/kubeconform" -strict -summary -kubernetes-version 1.34.0 -skip Issuer,ServiceMonitor
+      - name: Bootstrap the three-node cluster
+        run: python scripts/k3s_lab.py up
+      - name: Verify nodes, DNS, ingress and certificate
+        run: python scripts/k3s_lab.py verify
+      - name: Rehearse GitOps promotion, drift and digest rollback
+        id: gitops
+        run: |
+          mkdir -p docs/evidence/k3s
+          bash scripts/k3s/gitops.sh "${{ matrix.scenario == 'recovery' && 'bootstrap-only' || 'rehearse' }}" 2>&1 | tee docs/evidence/k3s/gitops.log
+        shell: bash
+      - name: Verify readiness, scaling and PostgreSQL persistence
+        if: matrix.scenario == 'operations'
+        shell: bash
+        run: bash scripts/k3s/application.sh 2>&1 | tee docs/evidence/k3s/application.log
+      - name: Rehearse three incidents
+        if: matrix.scenario == 'recovery'
+        shell: bash
+        run: bash scripts/k3s/incidents.sh 2>&1 | tee docs/evidence/k3s/incidents.log
+      - name: Measure alert delivery
+        if: ${{ !cancelled() && matrix.scenario == 'operations' && steps.gitops.outcome == 'success' }}
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ github.event_name == 'push' && secrets.TELEGRAM_BOT_TOKEN || '' }}
+          TELEGRAM_CHAT_ID: ${{ github.event_name == 'push' && secrets.TELEGRAM_CHAT_ID || '' }}
+        run: bash scripts/k3s/observe.sh 2>&1 | tee docs/evidence/k3s/alerting.log
+      - name: Save evidence
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p docs/evidence/k3s
+          export KUBECONFIG="${{ github.workspace }}/.local/k3s/kubeconfig"
+          kubectl get nodes -o wide > docs/evidence/k3s/nodes.txt 2>&1 || true
+          kubectl get ns > docs/evidence/k3s/namespaces.txt 2>&1 || true
+          kubectl -n smoke get all > docs/evidence/k3s/smoke.txt 2>&1 || true
+          kubectl -n smoke get certificate,secret > docs/evidence/k3s/certificate.txt 2>&1 || true
+          kubectl -n ingress-nginx get pods -o wide > docs/evidence/k3s/ingress.txt 2>&1 || true
+          kubectl get pods -A -o wide > docs/evidence/k3s/pods.txt 2>&1 || true
+      - name: Restore etcd and PostgreSQL into fresh volumes
+        if: ${{ !cancelled() && matrix.scenario == 'recovery' && steps.gitops.outcome == 'success' }}
+        shell: bash
+        run: bash scripts/k3s/dr.sh 2>&1 | tee docs/evidence/k3s/dr.log
+      - name: Collect diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          export KUBECONFIG="$PWD/.local/k3s/kubeconfig"
+          kubectl -n argocd get app portfolio -o json | jq '{conditions:.status.conditions,sync:.status.sync,health:.status.health}' || true
+          kubectl --kubeconfig .local/k3s/kubeconfig get events -A --sort-by=.lastTimestamp | tail -60 || true
+          python scripts/k3s_lab.py logs 2>&1 | tail -100 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k3s-evidence-${{ matrix.scenario }}
+          path: docs/evidence/k3s/
+          if-no-files-found: warn
+      - name: Tear down
+        if: always()
+        run: python scripts/k3s_lab.py down || true

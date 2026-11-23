@@ -1,0 +1,4 @@
+# Private Docker network used by the disposable rehearsal only.
+mirrors:
+  "lab-registry:5000":
+    endpoint: ["http://lab-registry:5000"]

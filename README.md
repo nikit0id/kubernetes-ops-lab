@@ -4,7 +4,42 @@
 
 Учебный DevOps-проект: Python HTTP-сервис в локальном двухузловом Kubernetes-кластере на **kind**. Контейнеризация, probes, ресурсы, диагностика `ImagePullBackOff` и откат Deployment.
 
-**Статус:** проект проверен на реальном локальном стенде WSL2: Docker build, два Ready-узла, две реплики, HTTP, DNS/ClusterIP, воспроизведение ImagePullBackOff и rollback. Все 16 тестов прошли на Windows и Linux. Текущий результат GitHub Actions — по значку CI выше. Подробности и ссылки на реальные запуски — [docs/verification.md](docs/verification.md). Это учебный стенд, не production-инфраструктура.
+**Статус:** проект проверен на реальном локальном стенде WSL2: Docker build, два Ready-узла, две реплики, HTTP, DNS/ClusterIP, воспроизведение ImagePullBackOff и rollback. Все 28 тестов прошли на Windows. Текущий результат GitHub Actions — по значку CI выше. Подробности и ссылки на реальные запуски — [docs/verification.md](docs/verification.md). Это учебный стенд, не production-инфраструктура.
+
+## k3s: три узла, ingress-nginx и cert-manager
+
+Стенд из этапа «Кластер» ([issue #3](https://github.com/nikit0id/kubernetes-ops-lab/issues/3)). Тот же HTTP-сервис, но в кластере k3s на локальном Docker: один server с embedded etcd и два agent, встроенный Traefik отключён в пользу ingress-nginx, сертификат выпускает cert-manager.
+
+```bash
+python scripts/k3s_lab.py doctor
+python scripts/k3s_lab.py up
+python scripts/k3s_lab.py verify
+```
+
+Стенд изолирован от kind-стенда выше: свой Compose-проект `k3s-lab`, свой kubeconfig `.local/k3s/kubeconfig`, свой контекст `k3s-lab`. Нужны Docker Engine, kubectl, Helm 3 и `openssl` в одной среде. Версия k3s закреплена (`K3S_VERSION`, по умолчанию `v1.34.13-k3s1`); тег `latest` не используется.
+
+`verify` проверяет три Ready-узла, CoreDNS, namespace-ы, условие `Ready` у `Certificate` и реальный HTTPS-ответ через ingress с проверкой цепочки по локальному корневому CA. Подробности, порты, ограничения и удаление — [docs/k3s-cluster.md](docs/k3s-cluster.md).
+
+[Прогон bootstrap и TLS в GitHub Actions](https://github.com/nikit0id/kubernetes-ops-lab/actions/runs/45196035552/job/137766758169). На чистом кластере после bootstrap репетиции запускаются в порядке шагов workflow: GitOps, приложение, инциденты, наблюдаемость, DR. Скрипты вызываются из корня репозитория через Bash. Команды и протоколы доступны в [k3s workflow](.github/workflows/k3s-lab.yml).
+
+```mermaid
+flowchart TD
+  Release["Образ и digest"] --> Values["gitops-values"]
+  Values --> Mirror["Тестовая ветка"]
+  Mirror --> Argo["Argo CD"]
+  Argo --> API["API и HPA"]
+  API --> DB["PostgreSQL и local-path"]
+  DB --> Dump["Логический дамп"]
+  Etcd["Embedded etcd"] --> Snap["Snapshot и token"]
+  Dump --> Restore["Временный кластер DR"]
+  Snap --> Restore
+  API --> Prom["Prometheus"]
+  Prom --> AM["Alertmanager"]
+```
+
+CI берёт ревизию API из релиза `gitops-values` и отправляет её в одноразовое Git-зеркало. Post-receive hook собирает образ, публикует его в registry тестовой сети и записывает полученный digest в тестовую ветку доставки. Argo CD наблюдает за этой веткой. Запись в рабочие репозитории и токен GHCR для репетиции не требуются.
+
+Для отправки тестового алерта в собственный Telegram-чат используйте секреты репозитория `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID`. При их отсутствии измеряется доставка на внутренний HTTP receiver. После DR публикуются только контрольная строка, RTO/RPO и результат health-check. [Порядок восстановления](docs/dr.md).
 
 ## Portfolio API через GitOps
 
@@ -62,12 +97,16 @@ flowchart LR
 ```text
 app/server.py             HTTP-сервис
 Dockerfile                контейнер без root
-kind/cluster.yaml         два узла
+kind/cluster.yaml         два узла kind
 k8s/                      Namespace, Deployment, Service
-scripts/lab.py            команды стенда
+k3s/compose/              три узла k3s на Docker Compose
+k3s/manifests/            Issuer, Certificate, smoke-workload
+k3s/ingress-nginx-values.yaml  настройки контроллера для стенда
+scripts/lab.py            команды kind-стенда
+scripts/k3s_lab.py        команды k3s-стенда
 tests/                    HTTP, манифесты, защитные проверки
 .github/workflows/ci.yml   проверки и end-to-end сценарий
-docs/                     разбор инцидента и статус проверок
+docs/                     инцидент, статус проверок, k3s-стенд
 ```
 
 ## 1. Запуск без Docker

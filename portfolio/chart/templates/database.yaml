@@ -20,6 +20,9 @@ spec:
     metadata:
       labels: {app: portfolio-postgres}
     spec:
+      {{- with .Values.database.nodeSelector }}
+      nodeSelector: {{ toJson . }}
+      {{- end }}
       containers:
         - name: postgres
           image: postgres:17-alpine

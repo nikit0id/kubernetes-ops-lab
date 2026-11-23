@@ -1,0 +1,20 @@
+# ingress-nginx values for the k3s-in-Docker lab.
+# The k3s server container publishes 80/443, so the controller binds hostPorts and
+# is pinned to the server node; a second replica would collide on those ports.
+controller:
+  kind: DaemonSet
+  service:
+    type: ClusterIP
+  hostPort:
+    enabled: true
+  # Only the server node publishes the ingress ports to the host in compose.
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+  admissionWebhooks:
+    enabled: true
+  metrics:
+    enabled: false

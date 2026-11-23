@@ -1,0 +1,4 @@
+minReplicas: 2
+database:
+  nodeSelector:
+    kubernetes.io/hostname: k3s-agent-1
