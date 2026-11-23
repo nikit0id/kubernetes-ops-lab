@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 source scripts/k3s/common.sh
 k wait hpa/portfolio-api --for=condition=ScalingActive --timeout=4m
-k wait deploy/portfolio-api --for=jsonpath='{.status.readyReplicas}'=2 --timeout=3m
+minimum_ready() {
+    k get deploy/portfolio-api -o json | jq -e '.status.readyReplicas >= 2'
+}
+until_ok 180 minimum_ready
 # Keep the original replicas serving. A standalone canary exercises the Service selector.
 canary=readiness-rehearsal
 owner=$(k create configmap "$canary" -o jsonpath='{.metadata.uid}')
@@ -25,13 +28,16 @@ k delete pod "$canary"
 k delete configmap "$canary"
 trap - EXIT
 # CPU is the HPA signal; this bounded job runs inside one API container.
+k wait hpa/portfolio-api --for=jsonpath='{.status.currentReplicas}'=2 --timeout=6m
 pod=$(k get pods -l app=portfolio-api -o jsonpath='{.items[0].metadata.name}')
-k exec "$pod" -- python -c 'import time; end=time.monotonic()+180
-while time.monotonic()<end: pass' >/dev/null &
+k exec "$pod" -- python -c 'import os,time
+end=time.monotonic()+180
+while time.monotonic()<end and not os.path.exists("/tmp/hpa-load-done"): pass' >/dev/null &
 burn=$!
 scaled() { k get hpa portfolio-api -o json | jq -e '.status.currentReplicas >= 3'; }
 until_ok 180 scaled
 k get hpa -o wide
+k exec "$pod" -- touch /tmp/hpa-load-done
 wait "$burn"
 sql -c 'CREATE TABLE IF NOT EXISTS lab_recovery(id text primary key);'
 marker="node-$(date +%s)"

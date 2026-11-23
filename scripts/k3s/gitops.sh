@@ -65,6 +65,8 @@ sync_release() {
     argo wait app/portfolio "--for=jsonpath={.status.sync.revisions[1]}=$rev" --timeout=6m
 }
 sync_release
+argo wait app/portfolio --for=jsonpath='{.status.sync.status}'=Synced --timeout=6m
+k wait --for=create deployment/portfolio-api --timeout=3m
 k rollout status deploy/portfolio-api --timeout=6m
 # Change a managed env var without restarting Pods, using a ConfigMap.
 k patch cm portfolio-api -p '{"data":{"PGDATABASE":"drift"}}'
