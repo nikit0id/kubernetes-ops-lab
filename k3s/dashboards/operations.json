@@ -1,0 +1,91 @@
+{
+  "uid": "portfolio-operations",
+  "title": "Portfolio operations",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "title": "HPA replicas",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"portfolio\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      }
+    },
+    {
+      "id": 2,
+      "title": "Container restarts",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "increase(kube_pod_container_status_restarts_total{namespace=\"portfolio\"}[5m])",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 8
+      }
+    },
+    {
+      "id": 3,
+      "title": "PVC used, %",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "100 * kubelet_volume_stats_used_bytes{namespace=\"portfolio\"} / kubelet_volume_stats_capacity_bytes",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 8
+      }
+    },
+    {
+      "id": 4,
+      "title": "Certificate life, days",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "(certmanager_certificate_expiration_timestamp_seconds{namespace=\"portfolio\"} - time())/86400",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 8
+      }
+    }
+  ]
+}

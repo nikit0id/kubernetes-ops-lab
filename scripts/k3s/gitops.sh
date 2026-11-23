@@ -20,7 +20,7 @@ echo $! > "$lab/git-server.pid"
 giturl="git://$gateway:17883"
 until_ok 20 git ls-remote --exit-code "$giturl/release.git" refs/heads/rehearsal
 helm upgrade --install monitoring kube-prometheus-stack --repo https://prometheus-community.github.io/helm-charts \
-  --version 93.6.1 -n monitoring --create-namespace -f portfolio/cluster/monitoring.yaml --wait --timeout 10m
+  --version 93.6.1 -n monitoring --create-namespace -f portfolio/cluster/monitoring.yaml -f k3s/monitoring-values.yaml --wait --timeout 10m
 kubectl create ns argocd
 kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.2/manifests/install.yaml >/dev/null
 kubectl -n argocd rollout status sts/argocd-application-controller --timeout=6m

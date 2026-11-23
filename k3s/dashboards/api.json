@@ -1,0 +1,49 @@
+{
+  "uid": "portfolio-api",
+  "title": "Portfolio api",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "title": "API targets",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "up{namespace=\"portfolio\",service=\"portfolio-api\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      }
+    },
+    {
+      "id": 2,
+      "title": "Ready API replicas",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "kube_deployment_status_replicas_ready{namespace=\"portfolio\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 8
+      }
+    }
+  ]
+}

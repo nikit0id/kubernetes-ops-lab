@@ -4,7 +4,7 @@ on:
   push:
     branches: [feat/k3s-cluster]
   pull_request:
-    paths: ["k3s/**", "scripts/k3s_lab.py", "tests/**", ".github/workflows/k3s-lab.yml"]
+    paths: ["k3s/**", "portfolio/**", "scripts/k3s/**", "scripts/k3s_lab.py", "tests/**", ".github/workflows/k3s-lab.yml"]
   workflow_dispatch:
 
 permissions:
@@ -59,6 +59,21 @@ jobs:
           mkdir -p docs/evidence/k3s
           bash scripts/k3s/gitops.sh 2>&1 | tee docs/evidence/k3s/gitops.log
         shell: bash
+      - name: Verify readiness, scaling and PostgreSQL persistence
+        shell: bash
+        run: bash scripts/k3s/application.sh 2>&1 | tee docs/evidence/k3s/application.log
+      - name: Rehearse three incidents
+        shell: bash
+        run: bash scripts/k3s/incidents.sh 2>&1 | tee docs/evidence/k3s/incidents.log
+      - name: Measure alert delivery
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ github.event_name == 'push' && secrets.TELEGRAM_BOT_TOKEN || '' }}
+          TELEGRAM_CHAT_ID: ${{ github.event_name == 'push' && secrets.TELEGRAM_CHAT_ID || '' }}
+        run: bash scripts/k3s/observe.sh 2>&1 | tee docs/evidence/k3s/alerting.log
+      - name: Restore etcd and PostgreSQL into fresh volumes
+        shell: bash
+        run: bash scripts/k3s/dr.sh 2>&1 | tee docs/evidence/k3s/dr.log
       - name: Save evidence
         if: always()
         shell: bash

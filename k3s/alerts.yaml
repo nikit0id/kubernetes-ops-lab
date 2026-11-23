@@ -1,0 +1,23 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: portfolio-operations
+  namespace: portfolio
+  labels: {release: monitoring}
+spec:
+  groups:
+    - name: portfolio.operations
+      interval: 15s
+      rules:
+        - alert: PortfolioRestartLoop
+          expr: increase(kube_pod_container_status_restarts_total{namespace="portfolio"}[5m]) >= 3
+          for: 1m
+        - alert: PortfolioHpaAtLimit
+          expr: kube_horizontalpodautoscaler_status_current_replicas{namespace="portfolio"} >= on(namespace,horizontalpodautoscaler) kube_horizontalpodautoscaler_spec_max_replicas{namespace="portfolio"}
+          for: 2m
+        - alert: PortfolioPvcAbove80Percent
+          expr: kubelet_volume_stats_used_bytes{namespace="portfolio"} / kubelet_volume_stats_capacity_bytes > 0.8
+          for: 2m
+        - alert: PortfolioCertificateExpiring
+          expr: certmanager_certificate_expiration_timestamp_seconds{namespace="portfolio"} - time() < 604800
+          for: 2m

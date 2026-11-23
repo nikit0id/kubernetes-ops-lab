@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: lab-route
+  namespace: portfolio
+  labels: {lab: portfolio}
+spec:
+  route:
+    receiver: evidence
+    groupWait: 5s
+    matchers:
+      - {name: alertname, value: LabDeliveryTest}
+  receivers:
+    - name: evidence
+      webhookConfigs:
+        - url: http://alert-receiver.portfolio.svc:8080/
