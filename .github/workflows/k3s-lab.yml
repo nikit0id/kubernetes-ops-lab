@@ -29,6 +29,10 @@ jobs:
       - run: python -m unittest discover -s tests -v
 
   cluster:
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [operations, recovery]
     needs: checks
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -65,27 +69,33 @@ jobs:
       - name: Verify nodes, DNS, ingress and certificate
         run: python scripts/k3s_lab.py verify
       - name: Rehearse GitOps promotion, drift and digest rollback
+        id: gitops
         run: |
           mkdir -p docs/evidence/k3s
-          bash scripts/k3s/gitops.sh 2>&1 | tee docs/evidence/k3s/gitops.log
+          bash scripts/k3s/gitops.sh "${{ matrix.scenario == 'recovery' && 'bootstrap-only' || 'rehearse' }}" 2>&1 | tee docs/evidence/k3s/gitops.log
         shell: bash
       - name: Verify readiness, scaling and PostgreSQL persistence
+        if: matrix.scenario == 'operations'
         shell: bash
         run: bash scripts/k3s/application.sh 2>&1 | tee docs/evidence/k3s/application.log
       - name: Rehearse three incidents
+        if: matrix.scenario == 'recovery'
         shell: bash
         run: bash scripts/k3s/incidents.sh 2>&1 | tee docs/evidence/k3s/incidents.log
       - name: Measure alert delivery
+        if: ${{ !cancelled() && matrix.scenario == 'operations' && steps.gitops.outcome == 'success' }}
         shell: bash
         env:
           TELEGRAM_BOT_TOKEN: ${{ github.event_name == 'push' && secrets.TELEGRAM_BOT_TOKEN || '' }}
           TELEGRAM_CHAT_ID: ${{ github.event_name == 'push' && secrets.TELEGRAM_CHAT_ID || '' }}
         run: bash scripts/k3s/observe.sh 2>&1 | tee docs/evidence/k3s/alerting.log
       - name: Snapshot healthy workload status before DR
+        if: matrix.scenario == 'recovery'
         shell: bash
         run: |
           kubectl --kubeconfig .local/k3s/kubeconfig get pods -A -o wide >docs/evidence/k3s/pre-dr-pods.txt
       - name: Restore etcd and PostgreSQL into fresh volumes
+        if: ${{ !cancelled() && matrix.scenario == 'recovery' && steps.gitops.outcome == 'success' }}
         shell: bash
         run: bash scripts/k3s/dr.sh 2>&1 | tee docs/evidence/k3s/dr.log
       - name: Save evidence
@@ -112,7 +122,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: k3s-evidence
+          name: k3s-evidence-${{ matrix.scenario }}
           path: docs/evidence/k3s/
           if-no-files-found: warn
       - name: Tear down

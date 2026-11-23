@@ -45,7 +45,9 @@ until_ok 20 git ls-remote --exit-code "$giturl/release.git" refs/heads/rehearsal
 helm upgrade --install monitoring kube-prometheus-stack --repo https://prometheus-community.github.io/helm-charts \
   --version 93.6.1 -n monitoring --create-namespace -f portfolio/cluster/monitoring.yaml -f k3s/monitoring-values.yaml --wait --timeout 10m
 kubectl create ns argocd
-kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.2/manifests/install.yaml >/dev/null
+curl -fsSL --retry 3 https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.2/manifests/install.yaml |
+    sed 's@public.ecr.aws/docker/library/redis:@docker.io/library/redis:@g' |
+    kubectl apply --server-side -n argocd -f - >/dev/null
 kubectl -n argocd rollout status sts/argocd-application-controller --timeout=6m
 kubectl create ns portfolio
 openssl rand -hex 32 | tr -d '\n' | k create secret generic portfolio-db --from-file=password=/dev/stdin
@@ -68,6 +70,7 @@ sync_release
 argo wait app/portfolio --for=jsonpath='{.status.sync.status}'=Synced --timeout=6m
 k wait --for=create deployment/portfolio-api --timeout=3m
 k rollout status deploy/portfolio-api --timeout=6m
+if [[ ${1:-} == bootstrap-only ]]; then exit 0; fi
 # Change a managed env var without restarting Pods, using a ConfigMap.
 k patch cm portfolio-api -p '{"data":{"PGDATABASE":"drift"}}'
 k wait cm/portfolio-api --for=jsonpath='{.data.PGDATABASE}'=portfolio --timeout=3m

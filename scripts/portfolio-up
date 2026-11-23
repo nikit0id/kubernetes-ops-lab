@@ -46,7 +46,9 @@ kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/down
 kubectl -n kube-system patch deploy metrics-server --type=json \
     -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply --server-side -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.2/manifests/install.yaml
+curl -fsSL --retry 3 https://raw.githubusercontent.com/argoproj/argo-cd/v3.6.2/manifests/install.yaml |
+    sed 's@public.ecr.aws/docker/library/redis:@docker.io/library/redis:@g' |
+    kubectl apply --server-side -n argocd -f -
 kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=6m
 kubectl -n argocd rollout status deployment/argocd-repo-server --timeout=6m
 # The Application template supplies the production repository and default branch.
