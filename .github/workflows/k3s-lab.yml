@@ -27,7 +27,7 @@ jobs:
   cluster:
     needs: checks
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -54,6 +54,11 @@ jobs:
         run: python scripts/k3s_lab.py up
       - name: Verify nodes, DNS, ingress and certificate
         run: python scripts/k3s_lab.py verify
+      - name: Rehearse GitOps promotion, drift and digest rollback
+        run: |
+          mkdir -p docs/evidence/k3s
+          bash scripts/k3s/gitops.sh 2>&1 | tee docs/evidence/k3s/gitops.log
+        shell: bash
       - name: Save evidence
         if: always()
         shell: bash
@@ -71,7 +76,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          docker compose -p k3s-lab -f k3s/compose/docker-compose.yml logs --tail 100 2>&1 || true
+          kubectl --kubeconfig .local/k3s/kubeconfig get events -A --sort-by=.lastTimestamp | tail -60 || true
           python scripts/k3s_lab.py logs 2>&1 | tail -100 || true
       - uses: actions/upload-artifact@v4
         if: always()

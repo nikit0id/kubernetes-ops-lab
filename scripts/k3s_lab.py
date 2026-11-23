@@ -255,26 +255,11 @@ def import_image():
     run("docker", "save", "-o", archive, IMAGE)
     for node in NODES:
         print(f"+ import {IMAGE} into {node_container(node)}", flush=True)
-        with archive.open("rb") as payload:
-            subprocess.run(
-                [
-                    "docker",
-                    "exec",
-                    "-i",
-                    node_container(node),
-                    "k3s",
-                    "ctr",
-                    "-n",
-                    "k8s.io",
-                    "images",
-                    "import",
-                    "-",
-                ],
-                cwd=ROOT,
-                check=True,
-                stdin=payload,
-                stdout=subprocess.DEVNULL,
-            )
+        inbox = "/var/lib/rancher/k3s/agent/images"
+        container = node_container(node)
+        run("docker", "exec", container, "mkdir", "-p", inbox)
+        run("docker", "cp", archive, f"{container}:/tmp/ops-lab.tar")
+        run("docker", "exec", container, "mv", "/tmp/ops-lab.tar", f"{inbox}/ops-lab.tar")
     archive.unlink()
 
 
@@ -384,6 +369,7 @@ def verify():
     if len(items) != 3:
         raise RuntimeError(f"Expected exactly three nodes, found {len(items)}")
     kube("wait", "--for=condition=Ready", "nodes", "--all", "--timeout=180s")
+    kube("apply", "-f", str(MANIFESTS / "smoke.yaml"))
     for namespace in ("kube-system", "ingress-nginx", "cert-manager", NAMESPACE):
         kube("get", "namespace", namespace, capture=True)
     kube(
@@ -397,8 +383,17 @@ def verify():
         "--timeout=180s",
     )
     kube("apply", "-f", str(MANIFESTS / "issuer.yaml"))
-    kube("apply", "-f", str(MANIFESTS / "smoke.yaml"))
     kube("-n", NAMESPACE, "rollout", "status", "deployment/smoke", "--timeout=180s")
+    kube(
+        "-n",
+        NAMESPACE,
+        "exec",
+        "deploy/smoke",
+        "--",
+        "python",
+        "-c",
+        "import socket; print(socket.gethostbyname('smoke.smoke.svc.cluster.local'))",
+    )
     # Issuance is asynchronous; the Ready condition is the real gate, not the apply.
     kube(
         "-n",
