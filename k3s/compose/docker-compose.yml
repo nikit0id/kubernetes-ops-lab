@@ -11,9 +11,6 @@ services:
     restart: "no"
     environment:
       - K3S_TOKEN=${K3S_TOKEN:?err}
-      # scripts/k3s_lab.py reads exactly this name from the published output dir.
-      - K3S_KUBECONFIG_OUTPUT=/output/kubeconfig
-      - K3S_KUBECONFIG_MODE=644
     tmpfs:
       - /run
       - /var/run
@@ -24,7 +21,6 @@ services:
         hard: 65535
     volumes:
       - k3s-server:/var/lib/rancher/k3s
-      - ${K3S_OUTPUT_DIR:?err}:/output
     ports:
       - "127.0.0.1:${K3S_API_PORT:-6443}:6443"
       - "127.0.0.1:${K3S_HTTP_PORT:-8081}:80"

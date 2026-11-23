@@ -36,14 +36,6 @@ class K3sLabBootstrapTests(unittest.TestCase):
         self.assertNotIn(":latest", text)
         self.assertIn("K3S_VERSION:?err", text)
 
-    def test_kubeconfig_output_name_matches_the_script(self):
-        """k3s writes whatever K3S_KUBECONFIG_OUTPUT names; the script reads KUBECONFIG."""
-        compose = load("k3s/compose/docker-compose.yml")
-        environment = compose["services"]["server"]["environment"]
-        output = next(item for item in environment if item.startswith("K3S_KUBECONFIG_OUTPUT="))
-        written = Path(output.split("=", 1)[1]).name
-        self.assertEqual(written, k3s_lab.KUBECONFIG.name)
-
     def test_compose_env_supplies_every_required_variable(self):
         """ps/down/logs must not abort on Compose interpolation of :?err variables."""
         with patch("scripts.k3s_lab.run") as run:
@@ -52,7 +44,7 @@ class K3sLabBootstrapTests(unittest.TestCase):
                     ports_file.is_file.return_value = False
                     k3s_lab.compose("ps")
         environment = run.call_args.kwargs["env"]
-        for name in ("K3S_TOKEN", "K3S_VERSION", "K3S_OUTPUT_DIR"):
+        for name in ("K3S_TOKEN", "K3S_VERSION"):
             self.assertIn(name, environment)
             self.assertTrue(environment[name])
 
@@ -180,7 +172,9 @@ class K3sLabBootstrapTests(unittest.TestCase):
             with patch("scripts.k3s_lab.KUBECONFIG", kubeconfig):
                 with patch("scripts.k3s_lab.STATE", state):
                     with patch("scripts.k3s_lab.PORTS_FILE", state / "ports.json"):
-                        self.assertTrue(k3s_lab.rewrite_kubeconfig())
+                        with patch("scripts.k3s_lab.run", return_value=kubeconfig.read_text()):
+                            self.assertTrue(k3s_lab.rewrite_kubeconfig())
+                        self.assertEqual(kubeconfig.stat().st_mode & 0o777, 0o600)
             rewritten = kubeconfig.read_text(encoding="utf-8")
             self.assertIn("server: https://127.0.0.1:16443", rewritten)
             self.assertIn("current-context: k3s-lab", rewritten)

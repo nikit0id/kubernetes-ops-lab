@@ -54,7 +54,6 @@ def compose(*args, capture=False, check=True, env=None):
     # Compose requires K3S_TOKEN and K3S_VERSION for every subcommand, not only
     # "up": without them ps/down/logs abort on interpolation before running.
     base = {
-        "K3S_OUTPUT_DIR": str(STATE),
         "K3S_TOKEN": write_token(),
         "K3S_VERSION": k3s_version(),
         "K3S_API_PORT": "6443",
@@ -125,7 +124,7 @@ def free_port(preferred):
 
 def write_token():
     """Create the cluster token once; it must survive a server restart."""
-    STATE.mkdir(parents=True, exist_ok=True)
+    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     token_file = STATE / "token"
     if not token_file.is_file():
         token_file.write_text(os.urandom(32).hex(), encoding="utf-8")
@@ -158,7 +157,7 @@ def up():
         "K3S_HTTP_PORT": str(free_port(8081)),
         "K3S_HTTPS_PORT": str(free_port(8443)),
     }
-    STATE.mkdir(parents=True, exist_ok=True)
+    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     PORTS_FILE.write_text(json.dumps(ports), encoding="utf-8")
     run("docker", "build", "-t", IMAGE, ".")
     compose(
@@ -182,9 +181,15 @@ def rewrite_kubeconfig():
     k3s writes the in-container API address and the context name "default".
     Neither is usable from the host, so both are rewritten deterministically.
     """
-    if not KUBECONFIG.is_file() or KUBECONFIG.stat().st_size == 0:
-        return False
-    text = KUBECONFIG.read_text(encoding="utf-8")
+    text = run(
+        "docker",
+        "exec",
+        node_container("server"),
+        "cat",
+        "/etc/rancher/k3s/k3s.yaml",
+        capture=True,
+        check=False,
+    )
     if "certificate-authority-data" not in text:
         return False
     ports = json.loads(PORTS_FILE.read_text(encoding="utf-8"))
@@ -206,7 +211,10 @@ def rewrite_kubeconfig():
         elif value == "default":
             value = CONTEXT
         lines.append(f"{match.group('prefix')}{key}: {value}")
-    KUBECONFIG.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    temporary = KUBECONFIG.with_suffix(".tmp")
+    with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as out:
+        out.write("\n".join(lines) + "\n")
+    temporary.replace(KUBECONFIG)
     return True
 
 
@@ -214,7 +222,7 @@ def wait_for_api(timeout=300):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if rewrite_kubeconfig():
-            if kube("get", "--raw", "/readyz", capture=True, check=False).strip():
+            if kube("get", "--raw", "/readyz", capture=True, check=False).strip() == "ok":
                 print("k3s API is ready", flush=True)
                 return
         time.sleep(3)
